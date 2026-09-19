@@ -146,6 +146,7 @@ var _poste_ida: Node3D
 var _poste_vuelta: Node3D
 var _cartel_informacion: Label3D
 var _fondo_cartel: MeshInstance3D
+var _icono_informacion: Label3D
 
 
 func _ready() -> void:
@@ -168,6 +169,19 @@ func _configurar_cartel_informacion() -> void:
 	var area: Area3D = get_node_or_null("AreaSeleccion") as Area3D
 	if area != null and not area.input_event.is_connected(_on_area_input_event):
 		area.input_event.connect(_on_area_input_event)
+	if not pasajeros_actualizados.is_connected(_on_pasajeros_actualizados):
+		pasajeros_actualizados.connect(_on_pasajeros_actualizados)
+	_icono_informacion = get_node_or_null("IconoInformacion") as Label3D
+	if _icono_informacion == null:
+		_icono_informacion = Label3D.new()
+		_icono_informacion.name = "IconoInformacion"
+		_icono_informacion.text = "i"
+		_icono_informacion.position = Vector3(0.0, 11.0, 0.0)
+		_icono_informacion.font_size = 48
+		_icono_informacion.modulate = Color(0.2, 0.8, 1.0, 1.0)
+		_icono_informacion.outline_size = 8
+		_icono_informacion.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		add_child(_icono_informacion)
 	_cartel_informacion = get_node_or_null("CartelInformacion") as Label3D
 	if _cartel_informacion == null:
 		_cartel_informacion = Label3D.new()
@@ -205,7 +219,11 @@ func _on_area_input_event(_camera: Camera3D, event: InputEvent, _event_position:
 func _actualizar_cartel_informacion() -> void:
 	if _cartel_informacion == null:
 		return
-	_cartel_informacion.text = "%s\nEsperando: %d / %d\nHistórico: %d" % [nombre_estacion, pasajeros_esperando, capacidad_maxima_espera, pasajeros_totales_historicos]
+	_cartel_informacion.text = "%s\nEsperando: %d / %d\nHistórico: %d\nSubieron: %d  Bajaron: %d" % [nombre_estacion, pasajeros_esperando, capacidad_maxima_espera, pasajeros_totales_historicos, pasajeros_subidos_total, pasajeros_bajados_total]
+
+
+func _on_pasajeros_actualizados(_estacion: Estacion) -> void:
+	_actualizar_cartel_informacion()
 
 
 
@@ -239,6 +257,26 @@ func _generar_pasajeros(delta: float) -> void:
 	pasajeros_totales_historicos += nuevos
 	pasajeros_actualizados.emit(self)
 	_actualizar_cartel_informacion()
+
+
+func desembarcar_pasajeros(cantidad: int) -> int:
+	var pasajeros: int = maxi(0, cantidad)
+	pasajeros_esperando += pasajeros
+	pasajeros_bajados_total += pasajeros
+	pasajeros_actualizados.emit(self)
+	_actualizar_cartel_informacion()
+	return pasajeros
+
+
+func embarcar_pasajeros(cantidad: int) -> int:
+	var pasajeros: int = mini(maxi(0, cantidad), pasajeros_esperando)
+	if pasajeros <= 0:
+		return 0
+	pasajeros_esperando -= pasajeros
+	pasajeros_subidos_total += pasajeros
+	pasajeros_actualizados.emit(self)
+	_actualizar_cartel_informacion()
+	return pasajeros
 
 
 func _notification(what: int) -> void:
