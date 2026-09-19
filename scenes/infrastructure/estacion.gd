@@ -11,6 +11,7 @@ class_name Estacion
 ## Compatible con Godot 4.x / 4.7.
 
 signal transformada_cambiada(estacion: Estacion)
+signal pasajeros_actualizados(estacion: Estacion)
 
 @export_group("Vinculación a la Vía")
 ## La traza (Path3D) a la que pertenece esta estación.
@@ -125,24 +126,92 @@ signal transformada_cambiada(estacion: Estacion)
 		activa = v
 		_notificar_trenes()
 
+@export_group("Pasajeros")
+@export_range(0, 100000, 1) var capacidad_maxima_espera: int = 100:
+	set(v):
+		capacidad_maxima_espera = maxi(0, v)
+
+@export_range(0.0, 1000.0, 0.1) var tasa_generacion_pasajeros: float = 0.5
+
+var pasajeros_esperando: int = 0
+var pasajeros_totales_historicos: int = 0
+var pasajeros_subidos_total: int = 0
+var pasajeros_bajados_total: int = 0
+var _pasajeros_pendientes: float = 0.0
+
 var _ajustando_transform: bool = false
 var _pendiente_snap: bool = false
 var _tiempo_ultimo_movimiento: int = 0
 var _poste_ida: Node3D
 var _poste_vuelta: Node3D
+var _cartel_informacion: Label3D
+var _fondo_cartel: MeshInstance3D
 
 
 func _ready() -> void:
+	if not Engine.is_editor_hint():
+		pasajeros_esperando = 0
+		pasajeros_totales_historicos = 0
+		pasajeros_subidos_total = 0
+		pasajeros_bajados_total = 0
+		_pasajeros_pendientes = 0.0
 	_conectar_postes()
 	_actualizar_dimensiones_anden()
 	_actualizar_posicion_postes()
+	_configurar_cartel_informacion()
+	_actualizar_cartel_informacion()
 	if Engine.is_editor_hint():
 		set_process(true)
+
+
+func _configurar_cartel_informacion() -> void:
+	var area: Area3D = get_node_or_null("AreaSeleccion") as Area3D
+	if area != null and not area.input_event.is_connected(_on_area_input_event):
+		area.input_event.connect(_on_area_input_event)
+	_cartel_informacion = get_node_or_null("CartelInformacion") as Label3D
+	if _cartel_informacion == null:
+		_cartel_informacion = Label3D.new()
+		_cartel_informacion.name = "CartelInformacion"
+		_cartel_informacion.position = Vector3(0.0, 8.0, 0.0)
+		_cartel_informacion.font_size = 32
+		_cartel_informacion.modulate = Color(1.0, 0.9, 0.2, 1.0)
+		_cartel_informacion.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		_cartel_informacion.outline_size = 8
+		_fondo_cartel = MeshInstance3D.new()
+		_fondo_cartel.name = "FondoCartelInformacion"
+		_fondo_cartel.position = Vector3(0.0, 0.0, 0.15)
+		var fondo_malla := QuadMesh.new()
+		fondo_malla.size = Vector2(9.0, 3.2)
+		var fondo_material := StandardMaterial3D.new()
+		fondo_material.albedo_color = Color(0.0, 0.0, 0.0, 0.9)
+		fondo_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		fondo_material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		fondo_material.render_priority = -1
+		fondo_malla.material = fondo_material
+		_fondo_cartel.mesh = fondo_malla
+		_cartel_informacion.add_child(_fondo_cartel)
+		add_child(_cartel_informacion)
+	_cartel_informacion.visible = false
+
+
+func _on_area_input_event(_camera: Camera3D, event: InputEvent, _event_position: Vector3, _normal: Vector3, _shape_idx: int) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		if _cartel_informacion == null:
+			_configurar_cartel_informacion()
+		_cartel_informacion.visible = not _cartel_informacion.visible
+		_actualizar_cartel_informacion()
+
+
+func _actualizar_cartel_informacion() -> void:
+	if _cartel_informacion == null:
+		return
+	_cartel_informacion.text = "%s\nEsperando: %d / %d\nHistórico: %d" % [nombre_estacion, pasajeros_esperando, capacidad_maxima_espera, pasajeros_totales_historicos]
 
 
 
 func _process(_delta: float) -> void:
 	if not Engine.is_editor_hint():
+		_generar_pasajeros(_delta)
 		return
 	if not alinear_a_via or not _pendiente_snap:
 		return
@@ -154,6 +223,22 @@ func _process(_delta: float) -> void:
 	if not clic_izq and tiempo_pasado > 60:
 		_pendiente_snap = false
 		_snap_a_posicion_actual()
+
+
+func _generar_pasajeros(delta: float) -> void:
+	if not activa or pasajeros_esperando >= capacidad_maxima_espera or tasa_generacion_pasajeros <= 0.0:
+		return
+
+	_pasajeros_pendientes += tasa_generacion_pasajeros * delta
+	var nuevos: int = mini(int(floor(_pasajeros_pendientes)), capacidad_maxima_espera - pasajeros_esperando)
+	if nuevos <= 0:
+		return
+
+	_pasajeros_pendientes -= nuevos
+	pasajeros_esperando += nuevos
+	pasajeros_totales_historicos += nuevos
+	pasajeros_actualizados.emit(self)
+	_actualizar_cartel_informacion()
 
 
 func _notification(what: int) -> void:
